@@ -1,40 +1,75 @@
+@using System.Timers
+
 <div class="text-editor">
-    <textarea @bind="Content" 
-              @bind:event="oninput" 
-              @onkeydown="HandleKeyDown"
-              class="editor-textarea"
-              style="font-family: @FontFamily; font-size: @FontSize">
+    <textarea
+        @bind="Text"
+        @bind:event="oninput"
+        @onkeydown="HandleKeyDown"
+        class="editor-textarea"
+        placeholder="Start typing your note here..."
+        rows="15">
     </textarea>
 </div>
 
 @code {
-    [Parameter]
-    public string Content { get; set; } = "";
+    private string _text = string.Empty;
+    private Timer _debounceTimer;
+    private bool _isDirty = false;
 
     [Parameter]
-    public EventCallback<string> ContentChanged { get; set; }
-
-    [Parameter]
-    public string FontFamily { get; set; } = "Consolas, monospace";
-
-    [Parameter]
-    public string FontSize { get; set; } = "14px";
-
-    private async Task HandleKeyDown(KeyboardEventArgs e)
+    public string Text
     {
-        if (e.CtrlKey && e.Key == "s")
+        get => _text;
+        set
         {
-            // Prevent browser save dialog
-            await JSRuntime.InvokeVoidAsync("preventDefault", e);
-            
-            // Trigger save functionality
-            await OnSave.InvokeAsync();
+            if (_text != value)
+            {
+                _text = value;
+                _isDirty = true;
+                RestartDebounceTimer();
+            }
         }
     }
 
     [Parameter]
-    public EventCallback OnSave { get; set; }
+    public EventCallback<string> TextChanged { get; set; }
 
-    [Inject]
-    private IJSRuntime JSRuntime { get; set; }
+    [Parameter]
+    public int DebounceTime { get; set; } = 500; // ms
+
+    protected override void OnInitialized()
+    {
+        _debounceTimer = new Timer(DebounceTime);
+        _debounceTimer.Elapsed += OnDebounceTimerElapsed;
+        _debounceTimer.AutoReset = false;
+    }
+
+    private void RestartDebounceTimer()
+    {
+        _debounceTimer.Stop();
+        _debounceTimer.Start();
+    }
+
+    private async void OnDebounceTimerElapsed(object sender, ElapsedEventArgs e)
+    {
+        if (_isDirty)
+        {
+            _isDirty = false;
+            await InvokeAsync(async () => await TextChanged.InvokeAsync(_text));
+        }
+    }
+
+    private void HandleKeyDown(KeyboardEventArgs e)
+    {
+        // Handle tab key to insert spaces instead of changing focus
+        if (e.Key == "Tab")
+        {
+            // This is handled by JavaScript interop in a real implementation
+        }
+    }
+
+    public void Dispose()
+    {
+        _debounceTimer?.Dispose();
+    }
 }

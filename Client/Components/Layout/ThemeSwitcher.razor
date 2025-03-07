@@ -1,15 +1,27 @@
+@inject ThemeService ThemeService
+
 <div class="theme-switcher">
-    <button @onclick="ToggleTheme">
-        @(ThemeService.IsDarkMode ? "☀️ Light Mode" : "🌙 Dark Mode")
+    <button @onclick="ToggleTheme" class="theme-button" title="@(ThemeService.IsDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode")">
+        @if (ThemeService.IsDarkMode)
+        {
+            <span class="oi oi-sun" aria-hidden="true"></span>
+        }
+        else
+        {
+            <span class="oi oi-moon" aria-hidden="true"></span>
+        }
     </button>
 </div>
 
 @code {
-    [Inject]
-    private ThemeService ThemeService { get; set; }
-
-    private void ToggleTheme()
+    protected override async Task OnInitializedAsync()
     {
-        ThemeService.ToggleTheme();
+        await ThemeService.InitializeAsync();
+        ThemeService.OnThemeChanged += (sender, args) => StateHasChanged();
+    }
+
+    private async Task ToggleTheme()
+    {
+        await ThemeService.ToggleThemeAsync();
     }
 }
