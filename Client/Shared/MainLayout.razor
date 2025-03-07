@@ -1,0 +1,29 @@
+@inherits LayoutComponentBase
+
+<div class="page @ThemeClass">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="top-row px-4">
+            <ThemeSwitcher />
+        </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>
+
+@code {
+    private string ThemeClass => ThemeService.IsDarkMode ? "dark-mode" : "light-mode";
+
+    [Inject]
+    private ThemeService ThemeService { get; set; }
+
+    protected override void OnInitialized()
+    {
+        ThemeService.ThemeChanged += (_, _) => StateHasChanged();
+    }
+}

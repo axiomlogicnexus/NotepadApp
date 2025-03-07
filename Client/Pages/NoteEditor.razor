@@ -1,0 +1,88 @@
+@page "/notes/new"
+@page "/notes/{Id}"
+@inject DocumentService DocumentService
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+
+<PageTitle>@(IsNewNote ? "New Note" : note.Title) - NotepadApp</PageTitle>
+
+<div class="editor-container">
+    <div class="editor-header">
+        <div class="editor-title">
+            <input type="text" @bind="note.Title" @bind:event="oninput" placeholder="Note title" class="title-input" />
+        </div>
+        <div class="editor-actions">
+            <button class="btn btn-primary" @onclick="SaveNote">
+                <span class="oi oi-check"></span> Save
+            </button>
+            <button class="btn btn-danger" @onclick="ConfirmDelete" disabled="@IsNewNote">
+                <span class="oi oi-trash"></span> Delete
+            </button>
+        </div>
+    </div>
+    
+    <div class="editor-tags mb-3">
+        <TagEditor Tags="@note.Tags" OnTagsChanged="HandleTagsChanged" />
+    </div>
+    
+    <div class="editor-content">
+        <TextEditor Content="@note.Content" ContentChanged="HandleContentChanged" OnSave="SaveNote" />
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public string Id { get; set; }
+    
+    private NoteDto note = new NoteDto();
+    private bool IsNewNote => string.IsNullOrEmpty(Id);
+    
+    protected override async Task OnInitializedAsync()
+    {
+        if (!IsNewNote)
+        {
+            var loadedNote = await DocumentService.GetNoteAsync(Id);
+            if (loadedNote != null)
+            {
+                note = loadedNote;
+            }
+            else
+            {
+                NavigationManager.NavigateTo("/notes");
+            }
+        }
+    }
+    
+    private void HandleContentChanged(string newContent)
+    {
+        note.Content = newContent;
+    }
+    
+    private void HandleTagsChanged(List<string> newTags)
+    {
+        note.Tags = newTags;
+    }
+    
+    private async Task SaveNote()
+    {
+        note.LastModified = DateTime.UtcNow;
+        
+        await DocumentService.SaveNoteAsync(note);
+        
+        if (IsNewNote)
+        {
+            NavigationManager.NavigateTo("/notes");
+        }
+    }
+    
+    private async Task ConfirmDelete()
+    {
+        bool confirmed = await JSRuntime.InvokeAsync<bool>("confirm", "Are you sure you want to delete this note?");
+        
+        if (confirmed)
+        {
+            await DocumentService.DeleteNoteAsync(note.Id);
+            NavigationManager.NavigateTo("/notes");
+        }
+    }
+}

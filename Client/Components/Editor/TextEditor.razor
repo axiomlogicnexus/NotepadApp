@@ -1,0 +1,40 @@
+<div class="text-editor">
+    <textarea @bind="Content" 
+              @bind:event="oninput" 
+              @onkeydown="HandleKeyDown"
+              class="editor-textarea"
+              style="font-family: @FontFamily; font-size: @FontSize">
+    </textarea>
+</div>
+
+@code {
+    [Parameter]
+    public string Content { get; set; } = "";
+
+    [Parameter]
+    public EventCallback<string> ContentChanged { get; set; }
+
+    [Parameter]
+    public string FontFamily { get; set; } = "Consolas, monospace";
+
+    [Parameter]
+    public string FontSize { get; set; } = "14px";
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.CtrlKey && e.Key == "s")
+        {
+            // Prevent browser save dialog
+            await JSRuntime.InvokeVoidAsync("preventDefault", e);
+            
+            // Trigger save functionality
+            await OnSave.InvokeAsync();
+        }
+    }
+
+    [Parameter]
+    public EventCallback OnSave { get; set; }
+
+    [Inject]
+    private IJSRuntime JSRuntime { get; set; }
+}

@@ -1,0 +1,92 @@
+@page "/notes"
+@inject DocumentService DocumentService
+@inject NavigationManager NavigationManager
+
+<PageTitle>My Notes - NotepadApp</PageTitle>
+
+<h1>My Notes</h1>
+
+<div class="actions mb-3">
+    <button class="btn btn-success" @onclick="CreateNewNote">
+        <span class="oi oi-plus"></span> Create New Note
+    </button>
+</div>
+
+@if (notes == null)
+{
+    <p>Loading...</p>
+}
+else if (!notes.Any())
+{
+    <div class="empty-state">
+        <p>You don't have any notes yet.</p>
+        <button class="btn btn-primary" @onclick="CreateNewNote">Create Your First Note</button>
+    </div>
+}
+else
+{
+    <div class="notes-container">
+        @foreach (var note in notes)
+        {
+            <div class="note-card" @onclick="() => OpenNote(note.Id)">
+                <h3 class="note-title">@note.Title</h3>
+                <div class="note-meta">
+                    <span class="date">Last modified: @note.LastModified.ToLocalTime().ToString("g")</span>
+                </div>
+                <div class="note-preview">
+                    @((MarkupString)GetPreview(note.Content))
+                </div>
+                @if (note.Tags.Any())
+                {
+                    <div class="note-tags">
+                        @foreach (var tag in note.Tags)
+                        {
+                            <span class="tag">@tag</span>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<NoteDto> notes;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadNotes();
+    }
+
+    private async Task LoadNotes()
+    {
+        notes = await DocumentService.GetAllNotesAsync();
+        notes = notes.OrderByDescending(n => n.LastModified).ToList();
+    }
+
+    private void OpenNote(string id)
+    {
+        NavigationManager.NavigateTo($"/notes/{id}");
+    }
+
+    private void CreateNewNote()
+    {
+        NavigationManager.NavigateTo("/notes/new");
+    }
+
+    private string GetPreview(string content)
+    {
+        if (string.IsNullOrEmpty(content))
+            return "<em>No content</em>";
+
+        // Strip HTML and limit to ~100 chars
+        var plainText = content
+            .Replace("<", "&lt;")
+            .Replace(">", "&gt;");
+            
+        if (plainText.Length > 100)
+            return plainText.Substring(0, 100) + "...";
+            
+        return plainText;
+    }
+}

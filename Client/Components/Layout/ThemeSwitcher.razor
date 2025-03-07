@@ -1,0 +1,15 @@
+<div class="theme-switcher">
+    <button @onclick="ToggleTheme">
+        @(ThemeService.IsDarkMode ? "☀️ Light Mode" : "🌙 Dark Mode")
+    </button>
+</div>
+
+@code {
+    [Inject]
+    private ThemeService ThemeService { get; set; }
+
+    private void ToggleTheme()
+    {
+        ThemeService.ToggleTheme();
+    }
+}

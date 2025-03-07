@@ -1,0 +1,59 @@
+<div class="tag-editor">
+    <div class="tags-list">
+        @foreach (var tag in Tags)
+        {
+            <div class="tag">
+                <span>@tag</span>
+                <button @onclick="() => RemoveTag(tag)" class="tag-remove">×</button>
+            </div>
+        }
+    </div>
+    
+    <div class="tag-input-container">
+        <input type="text" 
+               @bind="newTag" 
+               @bind:event="oninput" 
+               @onkeydown="HandleKeyDown"
+               placeholder="Add tag..." 
+               class="tag-input" />
+        <button @onclick="AddTag" class="btn btn-sm btn-primary">Add</button>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public List<string> Tags { get; set; } = new List<string>();
+    
+    [Parameter]
+    public EventCallback<List<string>> OnTagsChanged { get; set; }
+    
+    private string newTag = string.Empty;
+    
+    private async Task AddTag()
+    {
+        if (string.IsNullOrWhiteSpace(newTag))
+            return;
+            
+        if (!Tags.Contains(newTag))
+        {
+            Tags.Add(newTag);
+            await OnTagsChanged.InvokeAsync(Tags);
+        }
+        
+        newTag = string.Empty;
+    }
+    
+    private async Task RemoveTag(string tag)
+    {
+        Tags.Remove(tag);
+        await OnTagsChanged.InvokeAsync(Tags);
+    }
+    
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await AddTag();
+        }
+    }
+}
