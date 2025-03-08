@@ -1,13 +1,20 @@
 @inherits LayoutComponentBase
+@using NotepadApp.Client.Services
+@inject ThemeService ThemeService
+@inject IJSRuntime JSRuntime
 
-<div class="page @ThemeClass">
+<div class="page @ThemeService.CurrentTheme">
     <div class="sidebar">
         <NavMenu />
     </div>
 
     <main>
         <div class="top-row px-4">
-            <ThemeSwitcher />
+            <button class="btn btn-link" @onclick="ToggleTheme">
+                <span class="oi @(ThemeService.IsDarkTheme() ? "oi-sun" : "oi-moon")"></span>
+                @(ThemeService.IsDarkTheme() ? "Light Mode" : "Dark Mode")
+            </button>
+            <a href="https://docs.microsoft.com/aspnet/" target="_blank">About</a>
         </div>
 
         <article class="content px-4">
@@ -17,13 +24,18 @@
 </div>
 
 @code {
-    private string ThemeClass => ThemeService.IsDarkMode ? "dark-mode" : "light-mode";
-
-    [Inject]
-    private ThemeService ThemeService { get; set; }
-
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
-        ThemeService.ThemeChanged += (_, _) => StateHasChanged();
+        await ThemeService.InitializeAsync();
+
+        // Subscribe to theme changes
+        ThemeService.ThemeChanged(async (theme) => {
+        await InvokeAsync(StateHasChanged);
+        });
+    }
+
+    private async Task ToggleTheme()
+    {
+        await ThemeService.ToggleThemeAsync();
     }
 }

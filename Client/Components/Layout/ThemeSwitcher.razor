@@ -1,27 +1,35 @@
+@using NotepadApp.Client.Services
 @inject ThemeService ThemeService
 
 <div class="theme-switcher">
-    <button @onclick="ToggleTheme" class="theme-button" title="@(ThemeService.IsDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode")">
-        @if (ThemeService.IsDarkMode)
-        {
-            <span class="oi oi-sun" aria-hidden="true"></span>
-        }
-        else
-        {
-            <span class="oi oi-moon" aria-hidden="true"></span>
-        }
-    </button>
+  <button class="theme-button @(ThemeService.IsDarkTheme() ? "dark" : "light")" @onclick="ToggleTheme">
+    <span class="theme-icon">
+      @if (ThemeService.IsDarkTheme())
+      {
+        <span class="oi oi-sun" aria-hidden="true"></span>
+      }
+      else
+      {
+        <span class="oi oi-moon" aria-hidden="true"></span>
+      }
+    </span>
+    <span class="theme-text">@(ThemeService.IsDarkTheme() ? "Light Mode" : "Dark Mode")</span>
+  </button>
 </div>
 
 @code {
-    protected override async Task OnInitializedAsync()
-    {
-        await ThemeService.InitializeAsync();
-        ThemeService.OnThemeChanged += (sender, args) => StateHasChanged();
-    }
+  protected override async Task OnInitializedAsync()
+  {
+    await base.OnInitializedAsync();
+        
+    // Subscribe to theme changes
+    ThemeService.ThemeChanged(async _ => {
+      await InvokeAsync(StateHasChanged);
+    });
+  }
 
-    private async Task ToggleTheme()
-    {
-        await ThemeService.ToggleThemeAsync();
-    }
+  private async Task ToggleTheme()
+  {
+    await ThemeService.ToggleThemeAsync();
+  }
 }

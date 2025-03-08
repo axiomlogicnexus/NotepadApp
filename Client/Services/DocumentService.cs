@@ -2,11 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
-using System.Linq;
 using Blazored.LocalStorage;
+using Microsoft.AspNetCore.Components;
 using NotepadApp.Shared.Models;
-using Microsoft.Extensions.Logging;
 
 namespace NotepadApp.Client.Services
 {
@@ -14,216 +15,190 @@ namespace NotepadApp.Client.Services
     {
         private readonly HttpClient _httpClient;
         private readonly ILocalStorageService _localStorage;
-        private readonly ILogger<DocumentService> _logger;
-        private const string NotesStorageKey = "notes";
+        private readonly NavigationManager _navigationManager;
+        private const string NotesStorageKey = "local_notes";
+        private readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
 
-        public event EventHandler<NoteDto> OnNoteUpdated;
-        public event EventHandler<string> OnNoteDeleted;
+        // Events for note changes
+        public event Action<NoteDto>? NoteUpdated;
+        public event Action<string>? NoteDeleted;
 
-        public DocumentService(HttpClient httpClient, ILocalStorageService localStorage, ILogger<DocumentService> logger = null)
+        public DocumentService(HttpClient httpClient, ILocalStorageService localStorage, NavigationManager navigationManager)
         {
             _httpClient = httpClient;
             _localStorage = localStorage;
-            _logger = logger;
+            _navigationManager = navigationManager;
         }
 
-        public async Task<List<NoteDto>> GetAllNotesAsync()
+        public async Task<List<NoteDto>> GetNotesAsync()
         {
             try
             {
-                var notes = await _httpClient.GetFromJsonAsync<List<NoteDto>>("api/notes");
-                
-                // Cache the notes in local storage
-                if (notes != null)
+                // Try to get from API first
+                var apiNotes = await _httpClient.GetFromJsonAsync<List<NoteDto>>("api/notes");
+                if (apiNotes != null)
                 {
-                    await _localStorage.SetItemAsync(NotesStorageKey, notes);
-                }
-                
-                return notes ?? new List<NoteDto>();
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Failed to fetch notes from API, falling back to local storage");
-                
-                // Fallback to local storage if API call fails
-                return await _localStorage.GetItemAsync<List<NoteDto>>(NotesStorageKey) ?? new List<NoteDto>();
-            }
-        }
-
-        public async Task<NoteDto> GetNoteAsync(string id)
-        {
-            if (string.IsNullOrEmpty(id))
-            {
-                throw new ArgumentException("Note ID cannot be null or empty", nameof(id));
-            }
-
-            try
-            {
-                var note = await _httpClient.GetFromJsonAsync<NoteDto>($"api/notes/{id}");
-                return note;
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Failed to fetch note {NoteId} from API, falling back to local storage", id);
-                
-                var notes = await _localStorage.GetItemAsync<List<NoteDto>>(NotesStorageKey) ?? new List<NoteDto>();
-                return notes.FirstOrDefault(n => n.Id == id);
-            }
-        }
-
-        public async Task<NoteDto> SaveNoteAsync(NoteDto note)
-        {
-            if (note == null)
-            {
-                throw new ArgumentNullException(nameof(note), "Note cannot be null");
-            }
-
-            try
-            {
-                if (string.IsNullOrEmpty(note.Id))
-                {
-                    // Create new note
-                    var response = await _httpClient.PostAsJsonAsync("api/notes", note);
-                    if (response.IsSuccessStatusCode)
-                    {
-                        var savedNote = await response.Content.ReadFromJsonAsync<NoteDto>();
-                        if (savedNote != null)
-                        {
-                            OnNoteUpdated?.Invoke(this, savedNote);
-                            await UpdateLocalStorageCache(savedNote);
-                            return savedNote;
-                        }
-                    }
-                }
-                else
-                {
-                    // Update existing note
-                    var response = await _httpClient.PutAsJsonAsync($"api/notes/{note.Id}", note);
-                    if (response.IsSuccessStatusCode)
-                    {
-                        OnNoteUpdated?.Invoke(this, note);
-                        await UpdateLocalStorageCache(note);
-                        return note;
-                    }
-                }
-                
-                // If we get here, something went wrong with the API call
-                throw new HttpRequestException("Failed to save note to the server");
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Failed to save note to API, falling back to local storage");
-                
-                // Fallback to local storage
-                return await SaveNoteToLocalStorageAsync(note);
-            }
-        }
-
-        public async Task DeleteNoteAsync(string id)
-        {
-            if (string.IsNullOrEmpty(id))
-            {
-                throw new ArgumentException("Note ID cannot be null or empty", nameof(id));
-            }
-
-            try
-            {
-                var response = await _httpClient.DeleteAsync($"api/notes/{id}");
-                if (response.IsSuccessStatusCode)
-                {
-                    OnNoteDeleted?.Invoke(this, id);
-                    await RemoveNoteFromLocalStorageAsync(id);
+                    return apiNotes;
                 }
             }
-            catch (Exception ex)
+            catch
             {
-                _logger?.LogWarning(ex, "Failed to delete note {NoteId} from API, falling back to local storage", id);
-                
-                await RemoveNoteFromLocalStorageAsync(id);
+                // If API fails, fall back to local storage
+                Console.WriteLine("API call failed, falling back to local storage");
             }
+
+            // Get from local storage
+            var json = await _localStorage.GetItemAsStringAsync(NotesStorageKey);
+            if (!string.IsNullOrEmpty(json))
+            {
+                return JsonSerializer.Deserialize<List<NoteDto>>(json, _jsonOptions) ?? new List<NoteDto>();
+            }
+
+            return new List<NoteDto>();
         }
 
-        // Helper method to search notes by title or content
         public async Task<List<NoteDto>> SearchNotesAsync(string searchTerm)
         {
             if (string.IsNullOrWhiteSpace(searchTerm))
             {
-                return await GetAllNotesAsync();
+                return await GetNotesAsync();
             }
 
-            try
-            {
-                return await _httpClient.GetFromJsonAsync<List<NoteDto>>($"api/notes/search?term={Uri.EscapeDataString(searchTerm)}") ?? new List<NoteDto>();
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Failed to search notes from API, falling back to local storage");
-                
-                var notes = await _localStorage.GetItemAsync<List<NoteDto>>(NotesStorageKey) ?? new List<NoteDto>();
-                searchTerm = searchTerm.ToLower();
-                return notes.Where(n => 
-                    n.Title.ToLower().Contains(searchTerm) || 
-                    n.Content.ToLower().Contains(searchTerm) ||
-                    n.Tags.Any(t => t.ToLower().Contains(searchTerm))
-                ).ToList();
-            }
+            var allNotes = await GetNotesAsync();
+            searchTerm = searchTerm.ToLower();
+
+            return allNotes.FindAll(note => 
+                note.Title.ToLower().Contains(searchTerm) || 
+                note.Content.ToLower().Contains(searchTerm) ||
+                note.Tags.Any(tag => tag.ToLower().Contains(searchTerm)));
         }
 
-        #region Private Helper Methods
-
-        private async Task<NoteDto> SaveNoteToLocalStorageAsync(NoteDto note)
+        public async Task<NoteDto?> GetNoteAsync(string id)
         {
-            var notes = await _localStorage.GetItemAsync<List<NoteDto>>(NotesStorageKey) ?? new List<NoteDto>();
-            
+            try
+            {
+                // Try to get from API first
+                var apiNote = await _httpClient.GetFromJsonAsync<NoteDto>($"api/notes/{id}");
+                if (apiNote != null)
+                {
+                    return apiNote;
+                }
+            }
+            catch
+            {
+                // If API fails, fall back to local storage
+                Console.WriteLine($"API call failed for note {id}, falling back to local storage");
+            }
+
+            // Get from local storage
+            var notes = await GetNotesAsync();
+            return notes.Find(n => n.Id == id);
+        }
+
+        public async Task<NoteDto> SaveNoteAsync(NoteDto note)
+        {
             if (string.IsNullOrEmpty(note.Id))
             {
                 note.Id = Guid.NewGuid().ToString();
-                note.CreatedAt = DateTime.UtcNow;
-                notes.Add(note);
+                note.CreatedDate = DateTime.UtcNow;
+            }
+
+            note.LastModified = DateTime.UtcNow;
+
+            try
+            {
+                // Try to save to API first
+                var response = await _httpClient.PostAsJsonAsync("api/notes", note);
+                if (response.IsSuccessStatusCode)
+                {
+                    var savedNote = await response.Content.ReadFromJsonAsync<NoteDto>();
+                    if (savedNote != null)
+                    {
+                        OnNoteUpdated(savedNote);
+                        return savedNote;
+                    }
+                }
+            }
+            catch
+            {
+                // If API fails, fall back to local storage
+                Console.WriteLine("API save failed, falling back to local storage");
+            }
+
+            // Save to local storage
+            var notes = await GetNotesAsync();
+            var existingIndex = notes.FindIndex(n => n.Id == note.Id);
+            
+            if (existingIndex >= 0)
+            {
+                notes[existingIndex] = note;
             }
             else
             {
-                var existingNote = notes.FirstOrDefault(n => n.Id == note.Id);
-                if (existingNote != null)
-                {
-                    notes.Remove(existingNote);
-                }
-                note.UpdatedAt = DateTime.UtcNow;
                 notes.Add(note);
             }
-            
-            await _localStorage.SetItemAsync(NotesStorageKey, notes);
-            OnNoteUpdated?.Invoke(this, note);
+
+            await _localStorage.SetItemAsStringAsync(NotesStorageKey, JsonSerializer.Serialize(notes, _jsonOptions));
+            OnNoteUpdated(note);
             return note;
         }
 
-        private async Task RemoveNoteFromLocalStorageAsync(string id)
+        public async Task<bool> DeleteNoteAsync(string id)
         {
-            var notes = await _localStorage.GetItemAsync<List<NoteDto>>(NotesStorageKey) ?? new List<NoteDto>();
-            var noteToRemove = notes.FirstOrDefault(n => n.Id == id);
-            
-            if (noteToRemove != null)
+            try
             {
-                notes.Remove(noteToRemove);
-                await _localStorage.SetItemAsync(NotesStorageKey, notes);
-                OnNoteDeleted?.Invoke(this, id);
+                // Try to delete from API first
+                var response = await _httpClient.DeleteAsync($"api/notes/{id}");
+                if (response.IsSuccessStatusCode)
+                {
+                    OnNoteDeleted(id);
+                    return true;
+                }
             }
+            catch
+            {
+                // If API fails, fall back to local storage
+                Console.WriteLine($"API delete failed for note {id}, falling back to local storage");
+            }
+
+            // Delete from local storage
+            var notes = await GetNotesAsync();
+            var existingIndex = notes.FindIndex(n => n.Id == id);
+            
+            if (existingIndex >= 0)
+            {
+                notes.RemoveAt(existingIndex);
+                await _localStorage.SetItemAsStringAsync(NotesStorageKey, JsonSerializer.Serialize(notes, _jsonOptions));
+                OnNoteDeleted(id);
+                return true;
+            }
+
+            return false;
         }
 
-        private async Task UpdateLocalStorageCache(NoteDto updatedNote)
+        // Event handlers
+        public void OnNoteUpdated(NoteDto note)
         {
-            var notes = await _localStorage.GetItemAsync<List<NoteDto>>(NotesStorageKey) ?? new List<NoteDto>();
-            var existingNote = notes.FirstOrDefault(n => n.Id == updatedNote.Id);
-            
-            if (existingNote != null)
-            {
-                notes.Remove(existingNote);
-            }
-            
-            notes.Add(updatedNote);
-            await _localStorage.SetItemAsync(NotesStorageKey, notes);
+            NoteUpdated?.Invoke(note);
         }
 
-        #endregion
+        public void OnNoteDeleted(string noteId)
+        {
+            NoteDeleted?.Invoke(noteId);
+        }
+
+        // Navigation
+        public void NavigateToNote(string noteId)
+        {
+            _navigationManager.NavigateTo($"/note/{noteId}");
+        }
+
+        public void NavigateToNote(NoteDto note)
+        {
+            NavigateToNote(note.Id);
+        }
     }
 }

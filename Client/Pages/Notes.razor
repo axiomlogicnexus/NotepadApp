@@ -1,92 +1,257 @@
 @page "/notes"
-@inject DocumentService DocumentService
+@using NotepadApp.Shared.Models
+@using System.Text.Json
+@using NotepadApp.Client.Services
 @inject NavigationManager NavigationManager
+@inject DocumentService DocumentService
 
-<PageTitle>My Notes - NotepadApp</PageTitle>
+<PageTitle>Notes</PageTitle>
 
-<h1>My Notes</h1>
-
-<div class="actions mb-3">
-    <button class="btn btn-success" @onclick="CreateNewNote">
-        <span class="oi oi-plus"></span> Create New Note
-    </button>
-</div>
-
-@if (notes == null)
-{
-    <p>Loading...</p>
-}
-else if (!notes.Any())
-{
-    <div class="empty-state">
-        <p>You don't have any notes yet.</p>
-        <button class="btn btn-primary" @onclick="CreateNewNote">Create Your First Note</button>
-    </div>
-}
-else
-{
-    <div class="notes-container">
-        @foreach (var note in notes)
-        {
-            <div class="note-card" @onclick="() => OpenNote(note.Id)">
-                <h3 class="note-title">@note.Title</h3>
-                <div class="note-meta">
-                    <span class="date">Last modified: @note.LastModified.ToLocalTime().ToString("g")</span>
-                </div>
-                <div class="note-preview">
-                    @((MarkupString)GetPreview(note.Content))
-                </div>
-                @if (note.Tags.Any())
+<div class="notes-container">
+    <div class="notes-header">
+        <h1>Notes</h1>
+        <div class="notes-actions">
+            <div class="search-container">
+                <input type="text" 
+                       placeholder="Search notes..." 
+                       @bind="SearchTerm" 
+                       @bind:event="oninput" 
+                       @onkeyup="HandleSearch" />
+                @if (!string.IsNullOrEmpty(SearchTerm))
                 {
-                    <div class="note-tags">
-                        @foreach (var tag in note.Tags)
-                        {
-                            <span class="tag">@tag</span>
-                        }
-                    </div>
+                    <button class="clear-search" @onclick="ClearSearch">×</button>
                 }
             </div>
-        }
+            <button class="btn btn-primary" @onclick="CreateNewNote">
+                <span class="oi oi-plus"></span> New Note
+            </button>
+        </div>
+    </div>
+
+    @if (IsLoading)
+    {
+        <div class="loading-container">
+            <div class="spinner"></div>
+            <p>Loading notes...</p>
+        </div>
+    }
+    else if (NotesList.Count == 0)
+    {
+        <div class="empty-state">
+            <div class="empty-state-icon">
+                <span class="oi oi-document"></span>
+            </div>
+            <h2>No notes found</h2>
+            @if (!string.IsNullOrEmpty(SearchTerm))
+            {
+                <p>No notes match your search criteria.</p>
+                <button class="btn btn-outline-primary" @onclick="ClearSearch">Clear Search</button>
+            }
+            else
+            {
+                <p>Create your first note to get started.</p>
+                <button class="btn btn-primary" @onclick="CreateNewNote">Create Note</button>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="notes-grid">
+            @foreach (var note in NotesList)
+            {
+                <div class="note-card" @onclick="() => OpenNote(note)">
+                    <div class="note-card-header">
+                        <h3 class="note-title">@(string.IsNullOrEmpty(note.Title) ? "Untitled" : note.Title)</h3>
+                        <div class="note-actions">
+                            <button class="btn btn-sm" @onclick:stopPropagation="true" @onclick="() => EditNote(note)">
+                                <span class="oi oi-pencil"></span>
+                            </button>
+                            <button class="btn btn-sm" @onclick:stopPropagation="true" @onclick="() => DeleteNote(note.Id)">
+                                <span class="oi oi-trash"></span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="note-preview">
+                        @((note.Content.Length > 100) ? note.Content.Substring(0, 100) + "..." : note.Content)
+                    </div>
+                    @if (note.Tags.Count > 0)
+                    {
+                        <div class="note-tags">
+                            @foreach (var tag in note.Tags.Take(3))
+                            {
+                                <span class="note-tag">@tag</span>
+                            }
+                            @if (note.Tags.Count > 3)
+                            {
+                                <span class="note-tag-more">+@(note.Tags.Count - 3)</span>
+                            }
+                        </div>
+                    }
+                    <div class="note-footer">
+                        <span class="note-date">@note.LastModified.ToString("MMM d, yyyy")</span>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (showDeleteConfirmation)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal show d-block" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Delete Note</h5>
+                    <button type="button" class="close" @onclick="CancelDelete">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to delete this note? This action cannot be undone.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CancelDelete">Cancel</button>
+                    <button type="button" class="btn btn-danger" @onclick="ConfirmDelete">Delete</button>
+                </div>
+            </div>
+        </div>
     </div>
 }
 
 @code {
-    private List<NoteDto> notes;
+    private List<NoteDto> NotesList { get; set; } = new List<NoteDto>();
+    private List<NoteDto> AllNotes { get; set; } = new List<NoteDto>();
+    private bool IsLoading { get; set; } = true;
+    private string SearchTerm { get; set; } = string.Empty;
+    private string noteIdToDelete = string.Empty;
+    private bool showDeleteConfirmation = false;
+    private System.Timers.Timer searchDebounceTimer;
 
     protected override async Task OnInitializedAsync()
     {
+        // Subscribe to events
+        DocumentService.NoteUpdated += HandleNoteUpdated;
+        DocumentService.NoteDeleted += HandleNoteDeleted;
+
+        searchDebounceTimer = new System.Timers.Timer(300);
+        searchDebounceTimer.Elapsed += SearchDebounceTimerElapsed;
+        searchDebounceTimer.AutoReset = false;
+
         await LoadNotes();
     }
 
     private async Task LoadNotes()
     {
-        notes = await DocumentService.GetAllNotesAsync();
-        notes = notes.OrderByDescending(n => n.LastModified).ToList();
+        IsLoading = true;
+        try
+        {
+            if (string.IsNullOrEmpty(SearchTerm))
+            {
+                AllNotes = await DocumentService.GetNotesAsync();
+                NotesList = AllNotes;
+            }
+            else
+            {
+                NotesList = await DocumentService.SearchNotesAsync(SearchTerm);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error loading notes: {ex.Message}");
+            NotesList = new List<NoteDto>();
+        }
+        finally
+        {
+            IsLoading = false;
+            StateHasChanged();
+        }
     }
 
-    private void OpenNote(string id)
+    private void SearchDebounceTimerElapsed(object sender, System.Timers.ElapsedEventArgs e)
     {
-        NavigationManager.NavigateTo($"/notes/{id}");
+        InvokeAsync(async () =>
+        {
+            await LoadNotes();
+        });
+    }
+
+    private void HandleSearch()
+    {
+        searchDebounceTimer.Stop();
+        searchDebounceTimer.Start();
+    }
+
+    private async Task ClearSearch()
+    {
+        SearchTerm = string.Empty;
+        await LoadNotes();
     }
 
     private void CreateNewNote()
     {
-        NavigationManager.NavigateTo("/notes/new");
+        NavigationManager.NavigateTo("/note/new");
     }
 
-    private string GetPreview(string content)
+    private void OpenNote(NoteDto note)
     {
-        if (string.IsNullOrEmpty(content))
-            return "<em>No content</em>";
+        DocumentService.NavigateToNote(note);
+    }
 
-        // Strip HTML and limit to ~100 chars
-        var plainText = content
-            .Replace("<", "&lt;")
-            .Replace(">", "&gt;");
-            
-        if (plainText.Length > 100)
-            return plainText.Substring(0, 100) + "...";
-            
-        return plainText;
+    private void EditNote(NoteDto note)
+    {
+        DocumentService.NavigateToNote(note);
+    }
+
+    private void DeleteNote(string id)
+    {
+        noteIdToDelete = id;
+        showDeleteConfirmation = true;
+    }
+
+    private void CancelDelete()
+    {
+        noteIdToDelete = string.Empty;
+        showDeleteConfirmation = false;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (!string.IsNullOrEmpty(noteIdToDelete))
+        {
+            await DocumentService.DeleteNoteAsync(noteIdToDelete);
+        }
+        
+        showDeleteConfirmation = false;
+        noteIdToDelete = string.Empty;
+    }
+
+    // Event handlers
+    private void HandleNoteUpdated(NoteDto updatedNote)
+    {
+        InvokeAsync(async () =>
+        {
+            await LoadNotes();
+            StateHasChanged();
+        });
+    }
+
+    private void HandleNoteDeleted(string deletedNoteId)
+    {
+        InvokeAsync(async () =>
+        {
+            await LoadNotes();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        // Unsubscribe from events
+        DocumentService.NoteUpdated -= HandleNoteUpdated;
+        DocumentService.NoteDeleted -= HandleNoteDeleted;
+        
+        searchDebounceTimer?.Dispose();
     }
 }

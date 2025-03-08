@@ -1,66 +1,66 @@
 <div class="tag-editor">
-    <div class="tag-list">
-        @foreach (var tag in Tags)
-        {
-            <div class="tag">
-                <span class="tag-text">@tag</span>
-                <button class="tag-remove" @onclick="() => RemoveTag(tag)" title="Remove tag">
-                    <span class="oi oi-x" aria-hidden="true"></span>
-                </button>
-            </div>
-        }
-    </div>
-
-    <div class="tag-input-container">
-        <input
-            @bind="newTag"
-            @bind:event="oninput"
-            @onkeydown="HandleKeyDown"
-            placeholder="Add tag..."
-            class="tag-input" />
-
-        <button class="tag-add-button" @onclick="AddTag" disabled="@string.IsNullOrWhiteSpace(newTag)">
-            <span class="oi oi-plus" aria-hidden="true"></span>
+  <div class="tag-list">
+    @foreach (var tag in Tags)
+    {
+      <div class="tag">
+        <span class="tag-text">@tag</span>
+        <button class="tag-remove" @onclick="() => RemoveTag(tag)" title="Remove tag">
+          <span class="oi oi-x" aria-hidden="true"></span>
         </button>
-    </div>
+      </div>
+    }
+  </div>
+    
+  <div class="tag-input-container">
+    <input 
+      @bind="newTag" 
+      @bind:event="oninput"
+      @onkeydown="HandleKeyDown"
+      placeholder="Add tag..." 
+      class="tag-input" />
+        
+    <button class="tag-add-button" @onclick="AddTag" disabled="@string.IsNullOrWhiteSpace(newTag)">
+      <span class="oi oi-plus" aria-hidden="true"></span>
+    </button>
+  </div>
 </div>
 
 @code {
-    [Parameter]
-    public List<string> Tags { get; set; } = new List<string>();
+  [Parameter]
+  public List<string> Tags { get; set; } = new List<string>();
 
-    [Parameter]
-    public EventCallback<List<string>> TagsChanged { get; set; }
+  [Parameter]
+  public EventCallback<List<string>> TagsChanged { get; set; }
 
-    private string newTag = string.Empty;
+  private string newTag = string.Empty;
 
-    private async Task AddTag()
+  private async Task AddTag()
+  {
+    if (string.IsNullOrWhiteSpace(newTag))
+      return;
+
+    var tag = newTag.Trim();
+        
+    if (!Tags.Contains(tag, StringComparer.OrdinalIgnoreCase))
     {
-        if (string.IsNullOrWhiteSpace(newTag))
-            return;
-
-        var tag = newTag.Trim();
-
-        if (!Tags.Contains(tag, StringComparer.OrdinalIgnoreCase))
-        {
-            Tags.Add(tag);
-            await TagsChanged.InvokeAsync(Tags);
-        }
-
-        newTag = string.Empty;
+      Tags.Add(tag);
+      await TagsChanged.InvokeAsync(Tags);
     }
+        
+    newTag = string.Empty;
+  }
 
-    private async Task RemoveTag(string tag)
+  private async Task RemoveTag(string tag)
+  {
+    Tags.Remove(tag);
+    await TagsChanged.InvokeAsync(Tags);
+  }
+
+  private async Task HandleKeyDown(KeyboardEventArgs e)
+  {
+    if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(newTag))
     {
-        Tags.Remove(tag);
-        await TagsChanged.InvokeAsync(Tags);
+      await AddTag();
     }
-
-    private async Task HandleKeyDown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(newTag))
-        {
-            await AddTag();
-        }
-    }
+  }
 }
